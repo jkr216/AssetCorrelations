@@ -1,0 +1,97 @@
+---
+title: "Dynamic UI test"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard
+---
+
+```{r setup, include=FALSE}
+library(shiny)
+library(ggplot2)
+library(htmltools)
+```
+
+Sidebar {.sidebar}
+=====================================
+
+```{r}
+
+fluidRow(
+  column(9,
+      selectInput("dataset", "Pick Dataset", choices = c("mtcars", "iris"), selected = "iris"),
+      # This will hold column dropdowns and "Add plot" button
+      uiOutput("column_ui")
+    )
+  )
+
+  # pick the dataset
+  dataset <- reactive({
+    eval(parse(text = input$dataset))
+  })
+  
+  # Let user choose columns, and add plot.
+  output$column_ui <- renderUI({
+    choices <- c("Choose one" = "", names(dataset()))
+    tagList(
+      selectInput("xvar", "X variable", choices),
+      selectInput("yvar", "Y variable", choices),
+      conditionalPanel("input.xvar && input.yvar",
+                       actionButton("addplot", "Add plot")
+      )
+    )
+  })
+  
+
+
+```
+
+Rolling Correlations
+===================================== 
+
+Row {data-height=600}
+-----------------------------------------------------------------------
+
+### test
+
+```{r}
+
+div(id = "plot_container")
+ # One of the very few times you'll see me create a non-reactive
+  # session-level variable, and mutate it from within an observer
+  plot_count <- 0
+  
+  # Add a plot when addplot is clicked
+  observeEvent(input$addplot, {
+    plot_count <<- plot_count + 1
+    
+    id <- paste0("plot", plot_count)
+    # Take a static snapshot of xvar/yvar; the renderPlot we're
+    # creating here cares only what their values are now, not in
+    # the future.
+    xvar <- input$xvar
+    yvar <- input$yvar
+    
+    output[[id]] <- renderPlot({
+      df <- brushedPoints(dataset(), input$brush, allRows = TRUE)
+      
+      ggplot(df, aes_string(xvar, yvar, color = "selected_")) +
+        geom_point(alpha = 0.6) +
+        scale_color_manual(values = c("black", "green")) +
+        guides(color = FALSE) +
+        xlab(xvar) + ylab(yvar)
+    })
+    
+    insertUI("#plot_container", where = "beforeEnd",
+             ui = div(style = css(display = "inline-block"),
+                      plotOutput(id, brush = "brush", width = 275, height = 275)
+             )
+    )
+  })
+  
+  # Whenever the dataset changes, clear all plots
+  observeEvent(dataset(), {
+    removeUI("#plot_container *")
+  })
+    
+```
+

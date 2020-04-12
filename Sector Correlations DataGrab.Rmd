@@ -11,16 +11,32 @@ library(dplyr)
 # List of tickers for sector etfs. 
 # Omit XLRE because its inception is 2015. Not really enough to check out long term monthly correlations. 
 
-ticker <- c("XLY", "XLP", "XLE",	"XLF", "XLV",	
-             "XLI", "XLB", "XLK", "XLU", "SPY")	
+ticker <- c("XLB", "XLY",	"XLF", 
+            "IYR", "XLP", "XLV",	
+            "XLU", "IYX", "XLE", 
+            "XLI",  "XLK")	
 
 # And the accompanying sector names for those ETFs.
 
-sector <- c("Consumer Discretionary", "Consumer Staples", 
-             "Energy", "Financials", "Health Care", "Industrials", 
-             "Materials", "Technology", "Utilities", "Index")
+sector <- c("Materials", "Consumer Discretionary", "Financials", 
+            "Real Estate", "Consumer Defensive", "Health Care", 
+            "Utilities", "Communication Services", "Energy",
+            "Industrials", "Technology")
 
-etf_ticker_sector <- data_frame(ticker, sector) %>% as_tibble()
+etf_ticker_sector <- tribble(
+  ~Ticker, ~Sector,
+  "XLB", "Materials",
+  "XLY", "Consumer Discretionary",	
+  "XLF", "Financials",
+  "IYR", "Real Estate",
+  "XLP", "Consumer Defensive",
+  "XLV", "Health Care",	
+  "XLU", "Utilities",
+  "IYX", "Communication Services",
+  "XLE", "Energy",
+  "XLI", "Industrials",  
+  "XLK", "Technology"
+  )
 
 ```
 
@@ -32,6 +48,8 @@ monthly_stock_prices <- function(ticker, start_year) {
     
     # Get stock prices. Have a look at this previous post for more on getSymbols.
     prices <- getSymbols(Symbols = ticker, from = start_year, auto.assign = FALSE)
+    
+    
 
     # Rename the columns to something generic so we can select on it, else
     # it will include the ticker name and make the selection dependent on the
@@ -82,20 +100,27 @@ monthly_stock_returns <- function(prices) {
 ```
 
 ```{r}
-# Let's take our tibble of etf tickers and sectors and pass it to our two functions. 
+# Let's take our tibble of etf tickers and pass it to our two functions. 
 # We'll pull in the price data and the returns data, but I want just the returns
 # so we'll exclude the prices when we run select().
 
-etf_test <- etf_ticker_sector %>%
+etf_tickers_sectors_returns <- etf_ticker_sector %>%
     mutate(prices = map(ticker, function(.x) monthly_stock_prices(.x, "2006-10-01"))) %>% 
     mutate(returns  = map(prices, function(.x) monthly_stock_returns(.x))) %>% 
-    select(ticker, sector, returns) 
+    select(ticker, returns) %>% 
+    unnest() %>% 
+    spread(ticker, returns)
+
+# Take a look
+print(etf_tickers_sectors_returns)
 
 ```
 
 
 ```{r}
+
 # A function that calculates the rolling correlation between a sector and the SPY index. 
+
 # For a sanity check, you can pass in the SPY tibble and make sure it returns 1's.
 
 sector_index_correlation <- function(sector_returns, window) {
@@ -113,14 +138,20 @@ sector_index_correlation <- function(sector_returns, window) {
     merged_xts
 }
 
+# For a sanity check, you can pass in the SPY tibble and make sure it returns 1's.
+# sanity_check <- sector_index_correlation(etf_test$returns[[10]], 20)
+
 # Choose a sector ETF and a rolling window. 
 # I will go with a 20 month window and the Information Technology sector.
+# We will now have a new xts object with 3 time series: sector returns, SPY returns
+# and the rolling correlation between those return series.
 
 sector_correlation <- sector_index_correlation(etf_test$returns[[8]], 20)
 
 ```
 
 ```{r}
+
 # Let's graph the sector/index rolling correlation using our old friend dygraphs. 
 # I'll add an event for the financial crisis and shade the recession of 2007-2009 with 
 # an unimposing pinkish.

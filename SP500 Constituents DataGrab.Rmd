@@ -1,0 +1,256 @@
+---
+title: "Asset Correlations"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(rvest)
+library(tibble)
+library(dplyr)
+
+# Omit XLRE because its inception is 2015. Not really enough to check out long term monthly correlations
+ticker <- c("XLY", "XLP", "XLE",	"XLF", "XLV",	
+             "XLI", "XLB", "XLK", "XLU")	
+
+sector <- c("Consumer Discretionary", "Consumer Staples", 
+             "Energy", "Financials", "Health Care", "Industrials", 
+             "Materials", "Technology","Utilities")
+
+etf_ticker_sector <- data_frame(ticker, sector) %>% as_tibble()
+
+# Web-scrape SP500 stock list
+sp_500 <- read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies") %>%
+    html_node("table.wikitable") %>%
+    html_table() %>%
+    select(`Ticker symbol`, Security, `GICS Sector`) %>%
+    rename(ticker =`Ticker symbol`, company = Security, sector = `GICS Sector`) %>% 
+    as_tibble()
+
+# Have a look at the structure.
+str(sp_500)
+
+# If you're curious and new to tibble, as I am, it might also be interestingt to run the commands below, to see how things change if we remove the as_tibble() function
+# sp_500_notibble <- read_html("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies") %>%
+  #  html_node("table.wikitable") %>%
+  # html_table() %>%
+  # select(`Ticker symbol`, Security, `GICS Sector`) %>%
+  # rename(ticker =`Ticker symbol`, company = Security, sector = `GICS Sector`) %>% 
+
+# str(sp_500_notibble)
+# Now we would have a nice, simple dataframe, and there's nothing wrong with that! But, 
+# we will make use of the tibble structure later. 
+
+```
+
+```{r}
+# check for duplicates and remove them
+
+sp_500_check <- sp_500 %>%
+    group_by(company) %>%
+    summarize(count = n()) %>%
+    filter(count > 1)
+
+# Look at sp_500_check and you'll see that the duplicate company is Under Armour
+# So, let's look at the tickers and see what's up here
+
+dupe <- sp_500 %>% 
+    filter(company == "Under Armour")
+
+# Ah, it has two entries: tickers 'UA' and 'UAA'. Let's remove 'UAA'.
+
+sp_500 <- sp_500 %>% 
+    filter(ticker != "UAA")
+```
+
+
+```{r}
+install.packages("forcats")
+library(forcats)
+
+# Let's group and summarize by sector. Why? It's not really going to be crucial to our project
+# here but since we're ultimately looking at the correlations between sectors and the index
+# it's helpful to think about the distributions of the sectors. I hope. 
+
+sectors_frequency <- sp_500 %>%
+    group_by(sector) %>%
+    summarise(count = n()) 
+    
+# Use ggplot for a bar chart to visualize this stuff.
+ 
+sectors_frequency %>% 
+    ggplot(aes(x = sector %>% fct_reorder(count), y = count, fill = sector)) + 
+    geom_bar(stat = "identity")  +
+    geom_text(aes(label = count), size = 3, nudge_y = 4) + 
+    scale_y_continuous(limits = c(0,100)) +
+    ggtitle(label = "SP500 Sector Distribution") +
+    xlab(label = "Sector") +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+
+```{r}
+monthly_stock_prices <- function(ticker, start_year) {
+    # Get stock prices
+    prices <- getSymbols(Symbols = ticker,from = start_year, auto.assign = FALSE)
+
+    # Rename the columns to something generic so we can select on it, else
+    # it will include the ticker name and make the selection dependent on the
+    # ticker. 
+    names(prices) <- c("Open", "High", "Low", "Close", "Volume", "Adjusted")
+    
+    prices <- prices %>%
+            as_tibble() %>% 
+            select(Adjusted) %>% 
+            rownames_to_column(var = "Date") %>%
+            mutate(Date = ymd(Date))
+    
+    prices
+}
+
+```
+
+```{r}
+
+monthly_stock_returns <- function(prices) {
+    # Convert to xts, then delete the date column because we'll lubridate to recreate it how we want.
+    prices <- xts(prices[, -1], order.by = prices$Date)
+    
+    # Get log returns
+    log_returns_xts <- periodReturn(x = prices$Adjusted, type = 'log', period = 'monthly')
+    
+    # Rename
+    names(log_returns_xts) <- "returns"
+    
+    returns <- log_returns_xts %>%
+            as_tibble() %>%
+            rownames_to_column(var = "Date") %>%
+            mutate(Date = ymd(Date)) 
+        
+    returns
+}
+
+library(purrr)
+
+sp_500 <- sp_500 %>%
+    mutate( prices = map(ticker, function(.x) monthly_stock_prices(.x, "2006-10-01")),
+            returns  = map(prices, function(.x) monthly_stock_returns(.x)))
+
+etf_test <- etf_ticker_sector %>%
+    mutate( prices = map(ticker, function(.x) monthly_stock_prices(.x, "2006-10-01")),
+            returns  = map(prices, function(.x) monthly_stock_returns(.x)))
+
+```
+
+```{r}
+??unnest
+library(tidyr)
+sp_500_hp_unnest <- sp_500 %>%
+    select(ticker, sector, returns) %>%
+    unnest()
+sp_500_hp_unnest
+# sector correlations
+# total and average
+# asset correlations
+# change rolling windows
+# chart it
+# make it interactive
+# add events
+# extension: oil prices are great, but the hypothesis here is that something is driving
+# them. so back out the aggregate demand (because who cares about supply)
+
+
+
+rollingcorr.1m <- rollapply(z.logrtn,
+                            width=30,
+                            FUN = function(Z)
+                            {
+                              return(cor(Z,use="pairwise.complete.obs")[ut])
+                            },
+                            by.column=FALSE, align="right")
+colnames(rollingcorr.1m) <- n
+ 
+rollingcorr.1m.df <- fortify(rollingcorr.1m,melt=TRUE)
+ 
+ggplot(rollingcorr.1m.df,aes(x=Index)) +
+  geom_ribbon(aes(ymin=0,ymax=Value)) +
+  facet_grid(Series~.) +
+  ylim(c(-1,1)) +
+  theme_bw()
+```
+
+
+```{r}
+install.packages("roll")
+library(roll)
+library(xts)
+library(quantmod)
+library(PerformanceAnalytics)
+
+
+
+# Merge the 3 monthly return xts objects into 1 xts object.
+merged_returns <- merge.xts(GOOG, JPM, AMZN)
+
+# 252-day rolling correlation matrix
+result <- roll_cor(merged_returns, 10)
+rollingcorr_test <- merged_returns %>% 
+  rollapply(., width = 30, function(x) cor(x[,1],x[,3]), by.column=F) %>% 
+  `colnames<-`(paste(names(merged_returns[,3]), "/", names(merged_returns[,1]), "Rolling Correlation")) %>% filter(c(-1:-30), ?? ) %>%  
+  filter(!is.na(.))
+
+test <- period.apply(merged_returns, 20, cor)
+
+(paste(merged_returns[,1], "/", names(merged_returns[,3]), " Rolling Corr", 
+                     sep = ""))
+colnames(rollingcorr.1m)
+colnames(.) <- paste(names(merged_returns[,1]), "/", names(merged_returns[,3]), " Rolling Corr", sep = "")
+
+colnames(rollingcorr.1m) <- paste(names(merged_returns[,1]), "/", names(merged_returns[,3]), " Rolling Corr", sep = "")
+
+library(dygraphs)
+
+dygraph(rollingcorr.1m, main = "Rolling Correlation")           
+```
+
+```{r}
+ #*****************************************************************
+    # Load historical data
+    #****************************************************************** 
+    load.packages('quantmod')
+     
+    #*****************************************************************
+    # Code Logic
+    #****************************************************************** 
+    prices = data$prices['1993:01:29::']  
+        nperiods = nrow(prices)
+             
+    ret = prices / mlag(prices) - 1
+        ret = coredata(ret)
+         
+    # require at least 100 stocks with prices
+    index = which((count(t(prices)) > 100 ))
+        index = index[-c(1:252)]
+         
+    # average correlation among S&P 500 components
+    avg.cor = NA * prices[,1]
+     
+    # average correlation between the S&P 500 index (SPX) and its component stocks
+    avg.cor.spy = NA * prices[,1]
+     
+    for(i in index) {
+        hist = ret[ (i- 252 +1):i, ]
+        hist = hist[ , count(hist)==252, drop=F]
+            nleft = ncol(hist)
+         
+        correlation = cor(hist, use='complete.obs',method='pearson')
+        avg.cor[i,] = (sum(correlation) - nleft) / (nleft*(nleft-1))
+         
+        avg.cor.spy[i,] = sum(cor(ret.spy[ (i- 252 +1):i, ], hist, use='complete.obs',method='pearson')) / nleft
+         
+        if( i %% 100 == 0) cat(i, 'out of', nperiods, '\n')
+    }
+```
+

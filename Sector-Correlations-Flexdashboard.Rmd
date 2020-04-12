@@ -17,24 +17,32 @@ library(dplyr)
 # A function to build an xts object to hold both sector and index returns.
 etf_weekly_returns <- function(sector, period = "weekly", window = 10) {
 
+# Make a data frame of the sector and SP500 ETF
 etf_ticker_sector <- data_frame(c(sector, "SPY"))
 
 colnames(etf_ticker_sector) <- "tickers"
 
+# Use getSymbols and Ad to get adjusted prices
+
 symbols <- getSymbols(etf_ticker_sector$tickers, auto.assign = TRUE, warnings = FALSE)
 
 etf_prices <- do.call(merge, lapply(symbols, function(x) Ad(get(x))))
-    
+
+# We want log returns by the period chosen by the user. 
+
 etf_returns <- do.call(merge, lapply(etf_prices, 
                                      function(x) periodReturn(x, period = period, type = 'log')))
 
+# Create one xys object we can pass to rollapply
 merged_xts <- merge(etf_returns[, 1], etf_returns[, 2])
 
 merged_xts$rolling_cor <- rollapply(merged_xts, window, 
                                          function(x) cor(x[, 1], x[, 2], use = "pairwise.complete.obs"), 
                                          by.column = FALSE)
-    
+# We care about the name because it will be display in the dygraph when a user hovers
+
 names(merged_xts) <- c(paste(sector, "Returns", sep = ""), "SPY Returns", paste(sector, "/SPY Correlation", sep = ""))
+
     
 assign("sector_returns_correlations", merged_xts, .GlobalEnv)
 }
@@ -47,6 +55,10 @@ Sidebar {.sidebar}
   
 ```{r}
 helpText("Choose a sector")
+
+# Don't make the user memorize the ETF ticker symbols! 
+# Let them choose the intuitive sector name and then translate to the 
+# ticker symbol in the background.
 
 fluidRow(
   column(9,
@@ -63,10 +75,6 @@ fluidRow(
                   "Cons Staples" = "XLP")))
 )  
 
-#fluidRow(
- # column(7,
-#  textInput("index", "Index", "SPY"))
-#)
 
 helpText("Choose a returns time period and a rolling window")
 
@@ -77,19 +85,36 @@ fluidRow(
   numericInput("window", " Rolling Window", 10, min = 5, max = 50, step = 5))
 )
 
-checkboxInput("mean", label = 'Display Mean Rolling Correlation', value = FALSE)
+# I like giving the user the option of whether to display the mean, min and max. 
+# It doesn't make a huge difference, of course, but at least enables the user to 
+# notice the lines more consistently. 
 checkboxInput("max", label = 'Display Max Rolling Correlation', value = FALSE)
+checkboxInput("mean", label = 'Display Mean Rolling Correlation', value = FALSE)
 checkboxInput("min", label = 'Display Min Rolling Correlation', value = FALSE)
+
+# Build our correlation time series object here
+# so we can access it throughough the rest of the app
 
 sector_correlation <- reactive({
   sector_corr <- etf_weekly_returns(input$sector, input$period, input$window)
   sector_corr[, 3]
 })
 
+# These could all be reactives up in the setup
+avg <- reactive({ 
+  avg <- round(mean(sector_correlation(),  na.rm=T), 2)
+  })
+mini <- reactive({
+  mini <- round(min(sector_correlation(),  na.rm=T), 2)
+  })
+maxi <- reactive({
+  maxi <- round(max(sector_correlation(),  na.rm=T), 2)
+  })
+
 ```
 
 Rolling Correlations
-=====================================  
+===================================== 
 
 Row {data-height=600}
 -----------------------------------------------------------------------
@@ -97,20 +122,18 @@ Row {data-height=600}
 ### Sector/SP500 Rolling Correlations
 
 ```{r}
-##dygraph chunk
+# Dygraph chunk
+
 dygraphOutput("dygraphCorrelation")
 
 output$dygraphCorrelation <- renderDygraph({
   
-  avg <- mean(sector_correlation(),  na.rm=T)
-  mini <- min(sector_correlation(),  na.rm=T)
-  maxi <- max(sector_correlation(),  na.rm=T)
-  
   dygraph(sector_correlation(), 
-          main = paste("Rolling", input$period, "Correlation ", input$sector, "/SPY", sep = " ")) %>% 
-  dyLimit(if(input$mean == TRUE) {avg}, color = 'black') %>% 
-  dyLimit(if(input$min == TRUE) {mini}, color = 'red') %>% 
-  dyLimit(if(input$max == TRUE) {maxi}, color = 'blue')
+          main = paste("rolling", input$period, "correlation ", input$sector, "/SPY", sep = " ")) %>% 
+  dyLimit(if(input$mean == TRUE) {avg()}, color = 'black') %>% 
+  dyLimit(if(input$min == TRUE) {mini()}, color = 'red') %>% 
+  dyLimit(if(input$max == TRUE) {maxi()}, color = 'blue')
+  
 })
 
 ```
@@ -123,9 +146,9 @@ Row {data-height=200}
 ```{r}
 valueBoxOutput("approvalBox1")
 output$approvalBox1<-renderValueBox({
-  avg <- round(mean(sector_correlation(),  na.rm=T), 2)
-  
-  valueBox(value = avg, icon = "fa-line-chart", color = "primary")
+ 
+  # Display the mean we calculated in the setup
+  valueBox(value = avg(), icon = "fa-line-chart", color = "primary")
   
 })
 ```
@@ -135,8 +158,9 @@ output$approvalBox1<-renderValueBox({
 ```{r}
 valueBoxOutput("approvalBox2")
 output$approvalBox2<-renderValueBox({
-  maxim <- round(max(sector_correlation(),  na.rm=T), 2)
-  valueBox(value = maxim, icon = "fa-line-chart", color = "primary")
+  
+  # Display the max we calculated in the setup
+  valueBox(value = maxi(), icon = "fa-line-chart", color = "primary")
   
 })
 ```
@@ -146,8 +170,9 @@ output$approvalBox2<-renderValueBox({
 ```{r}
 valueBoxOutput("approvalBox3")
 output$approvalBox3<-renderValueBox({
-  minim <- round(min(sector_correlation(),  na.rm=T), 2)
-  valueBox(value = minim, icon = "fa-line-chart", color = "primary")
+  
+  # Display the min we calculated in the setup
+  valueBox(value = mini(), icon = "fa-line-chart", color = "primary")
   
 })
 ```
