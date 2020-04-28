@@ -15,36 +15,36 @@ library(dygraphs)
 library(dplyr)
 
 # A function to build an xts object to hold both sector and index returns.
-etf_weekly_returns <- function(sector, period = "weekly", window = 10) {
+sector_correlations <- function(sector, period = "weekly", window = 10) {
 
-# Make a data frame of the sector and SP500 ETF
+# Make a data frame of the sector and SP500 ETF.
 etf_ticker_sector <- data_frame(c(sector, "SPY"))
 
 colnames(etf_ticker_sector) <- "tickers"
 
-# Use getSymbols and Ad to get adjusted prices
+# Use getSymbols and Ad to get adjusted prices.
 
-symbols <- getSymbols(etf_ticker_sector$tickers, auto.assign = TRUE, warnings = FALSE)
+symbols <- getSymbols(etf_ticker_sector$tickers, src = 'google', auto.assign = TRUE, warnings = FALSE)
 
-etf_prices <- do.call(merge, lapply(symbols, function(x) Ad(get(x))))
+etf_prices <- do.call(merge, lapply(symbols, function(x) Cl(get(x))))
 
 # We want log returns by the period chosen by the user. 
 
 etf_returns <- do.call(merge, lapply(etf_prices, 
                                      function(x) periodReturn(x, period = period, type = 'log')))
 
-# Create one xys object we can pass to rollapply
+# Create one xts object we can pass to rollapply.
 merged_xts <- merge(etf_returns[, 1], etf_returns[, 2])
 
 merged_xts$rolling_cor <- rollapply(merged_xts, window, 
                                          function(x) cor(x[, 1], x[, 2], use = "pairwise.complete.obs"), 
                                          by.column = FALSE)
-# We care about the name because it will be display in the dygraph when a user hovers
+# We care about the name because it will be displayed in the dygraph when a user hovers.
 
 names(merged_xts) <- c(paste(sector, "Returns", sep = ""), "SPY Returns", paste(sector, "/SPY Correlation", sep = ""))
 
     
-assign("sector_returns_correlations", merged_xts, .GlobalEnv)
+assign("sector_correlations", merged_xts, .GlobalEnv)
 }
 
 ```
@@ -91,16 +91,20 @@ fluidRow(
 checkboxInput("max", label = 'Display Max Rolling Correlation', value = FALSE)
 checkboxInput("mean", label = 'Display Mean Rolling Correlation', value = FALSE)
 checkboxInput("min", label = 'Display Min Rolling Correlation', value = FALSE)
+```
+
+```{r Ca}
 
 # Build our correlation time series object here
-# so we can access it throughough the rest of the app
+# so we can access it throughout the rest of the app.
 
 sector_correlation <- reactive({
-  sector_corr <- etf_weekly_returns(input$sector, input$period, input$window)
+  sector_corr <- sector_correlations(input$sector, input$period, input$window)
   sector_corr[, 3]
 })
 
-# These could all be reactives up in the setup
+# Let's calculate mean, minimum and maximum rolling correlations. 
+# We'll use these on the graph and in the value boxes.
 avg <- reactive({ 
   avg <- round(mean(sector_correlation(),  na.rm=T), 2)
   })
@@ -122,7 +126,7 @@ Row {data-height=600}
 ### Sector/SP500 Rolling Correlations
 
 ```{r}
-# Dygraph chunk
+# Dygraph time!
 
 dygraphOutput("dygraphCorrelation")
 
@@ -130,6 +134,8 @@ output$dygraphCorrelation <- renderDygraph({
   
   dygraph(sector_correlation(), 
           main = paste("rolling", input$period, "correlation ", input$sector, "/SPY", sep = " ")) %>% 
+  # A new wrinkle that hasn't been included in previous flexdashboards: let the user add lines to the 
+  # dygraph.   
   dyLimit(if(input$mean == TRUE) {avg()}, color = 'black') %>% 
   dyLimit(if(input$min == TRUE) {mini()}, color = 'red') %>% 
   dyLimit(if(input$max == TRUE) {maxi()}, color = 'blue')
@@ -147,7 +153,8 @@ Row {data-height=200}
 valueBoxOutput("approvalBox1")
 output$approvalBox1<-renderValueBox({
  
-  # Display the mean we calculated in the setup
+  # Display the mean we calculated in 'avg' reactive function above.
+  
   valueBox(value = avg(), icon = "fa-line-chart", color = "primary")
   
 })
